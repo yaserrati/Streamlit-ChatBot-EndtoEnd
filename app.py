@@ -4,6 +4,10 @@ from dotenv import load_dotenv
 import google.generativeai as genai
 import logging
 import pandas as pd
+import pandasql as ps
+import re
+
+
 # -------------------------------------------------------------------------------------------------------
 load_dotenv()
 # Configure logging
@@ -31,71 +35,113 @@ def sanitize_sql(sql):
     return sql
 
 # Define your prompt for SQL generation
-sql_prompt = """
-You are an expert in converting English questions to SQL queries!
-The SQL database has the following views:
-1. `view_player` with the columns:
-   - player_id (INTEGER PRIMARY KEY AUTOINCREMENT)
-   - first_name (TEXT)
-   - last_name (TEXT)
-   - position (TEXT)
-   - team_id (INTEGER)
-   - age (INTEGER)
-   - nationality (TEXT)
-   - goals (INTEGER)
 
-2. `view_team` with the columns:
-   - team_id (INTEGER PRIMARY KEY AUTOINCREMENT)
-   - team_name (TEXT)
-   - title (INTEGER)
+def prompt_gemmi():
+    
+    start_prompt =""""
+        You are an expert in converting natural language questions into SQL queries. 
+        The SQL database schema is provided below:
+        Table: players
+        Columns:
+            - Name (TEXT)
+            - Age (INTEGER)
+            - Position (TEXT)
+            - Nationality (TEXT)
+            - Matches_Played (INTEGER)
+            - Goals_Scored (INTEGER)
+            - Assists (INTEGER)
+            - Yellow_Cards (INTEGER)
+            - Red_Cards (INTEGER)
+            - Height_CM (INTEGER)
+            - Weight_KG (INTEGER)
+        It is important that the column names used in your SQL query match exactly with the column names in the schema. 
+        Ensure that any aliases you use for columns in the SQL query also correctly match the schema names or are clearly defined.
+        Here are some examples:
+        Question: List all players
+        SQL Query: SELECT * FROM players;
+        Question: What are the names and ages of players who scored more than 20 goals?
+        SQL Query: SELECT Name, Age FROM players WHERE Goals_Scored > 20;
+        Question: Find the player with the highest number of assists
+        SQL Query: SELECT Name, Assists FROM players ORDER BY Assists DESC LIMIT 1;
+        Question: Which players are taller than 180 cm and weigh less than 80 kg?
+        SQL Query: SELECT Name FROM players WHERE Height_CM > 180 AND Weight_KG < 80;
+        Guidelines:
+        1. Ensure the SQL code is syntactically correct and does not include delimiters like `;`.
+        2. Avoid SQL keywords or delimiters in the output.
+        3. Handle different variations of questions accurately.
+        4. The SQL code should be valid, executable, and not contain unnecessary delimiters.
+        """
+    return start_prompt
 
-For example:
-Example 1 - How many players are there?,
-the SQL command will be something like this:
-SELECT COUNT(*) FROM view_player;
 
-Example 2 - List all players in the team 'Barcelona',
-the SQL command will be something like this:
-SELECT first_name, last_name 
-FROM view_player p
-JOIN view_team t ON p.team_id = t.team_id
-WHERE t.team_name = 'Barcelona';
-
-Example 3 - What are the titles of all teams?,
-the SQL command will be something like this:
-SELECT team_name, title_count 
-FROM view_team;
-
-Example 4 - List all players and their teams,
-the SQL command will be something like this:
-SELECT p.first_name, p.last_name, t.team_name
-FROM view_player p
-JOIN view_team t ON p.team_id = t.team_id;
-
-Guidelines:
-1. Ensure the SQL code is syntactically correct and does not include delimiters like `;`.
-2. Avoid SQL keywords or delimiters in the output.
-3. Handle different variations of questions accurately.
-4. The SQL code should be valid, executable, and not contain unnecessary delimiters.
-
-Schema:
-- View: view_player
-  Columns: player_id INTEGER PRIMARY KEY AUTOINCREMENT,
-           first_name TEXT,
-           last_name TEXT,
-           position TEXT,
-           team_id INTEGER,
-           age INTEGER,
-           nationality TEXT,
-           goals INTEGER
-
-- View: view_team
-  Columns: team_id INTEGER PRIMARY KEY AUTOINCREMENT,
-           team_name TEXT,
-           title_count INTEGER
-"""
 # -------------------------------------------------------------------------------------------------------
+def generate_conversational_response(question):
+    # Exemple de génération de réponse conversationnelle
+    custom_prompt = f"""
+    You are an assistant that responds to basic conversational queries in a friendly and helpful manner.
+    If a user greets you or asks how you are, respond with a polite and friendly reply.
+    If the user asks for specific information, a specific topic, a question, or an order, respond with 
+    "I am here to chat with you, but I do not have the information you are looking for."
 
+    Example interactions:
+    User: "Hey"
+    Assistant: "Hello! How can I help you today?"
+
+    User: "How are you?"
+    Assistant: "I'm doing well, thank you! How can I assist you today?"
+
+    User: "Can you help me?"
+    Assistant: "Of course! What do you need help with?"
+
+    User: "Tell me about the latest news."
+    Assistant: "I am here to chat with you, but I do not have the information you are looking for."
+
+    User: "What's the weather like?"
+    Assistant: "I am here to chat with you, but I do not have the information you are looking for."
+
+    User: "Order a pizza for me."
+    Assistant: "I am here to chat with you, but I do not have the information you are looking for."
+
+    User: "Tell me a joke."
+    Assistant: "I am here to chat with you, but I do not have the information you are looking for."
+
+    User: "Can you tell me about Python programming?"
+    Assistant: "I am here to chat with you, but I do not have the information you are looking for."
+
+    Now, respond to the following question:
+    User: {question}
+    Assistant:
+    """
+    sql_query = get_gemini_response(custom_prompt.format(question=question), "")
+    return sql_query
+    
+
+def respond_to_question(question, dataframe, prompt):
+    related_keywords = ['players', 'name', 'age', 'position', 'nationality',
+                        'matches played', 'goals scored', 'assists',
+                        'yellow cards', 'red cards', 'height', 'weight', 'goalkeeper ']
+
+    # Vérifier si la question est liée à la base de données
+    if any(keyword in question.lower() for keyword in related_keywords):
+        # Générer la requête SQL
+        sql_query = get_gemini_response(prompt, question)
+        sql_query = sql_query.strip('"')
+
+        # Vérifier que la requête contient "SELECT"
+        if "SELECT" in sql_query.upper():
+            try:
+                # Passer le DataFrame avec le nom de la table correct
+                result = ps.sqldf(sql_query, {'players': dataframe})
+                return result, 'dataframe'
+            except Exception as e:
+                return f"no result found: {e}", 'error'
+        else:
+            return "Generated SQL query is not a valid SELECT statement.", 'error'
+    else:
+        # Générer une réponse conversationnelle
+        response = generate_conversational_response(question)
+        return response, 'text'
+# -------------------------------------------------------------------------------------------------------
 
 # Set page configuration
 st.set_page_config(
@@ -132,6 +178,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+players=pd.read_csv("football_players_n.csv")
 # Title of the app
 st.title("MyTeam Bot 🤖")
 
@@ -152,15 +199,20 @@ for message in st.session_state.messages:
         st.markdown(message["content"])
 
 # React to user input
+# React to user input
 if prompt := st.chat_input("What is up?"):
     # Display user message in chat message container
     st.chat_message("user").markdown(prompt)
     # Add user message to chat history
     st.session_state.messages.append({"role": "user", "content": prompt})
-    sql_query = get_gemini_response(sql_prompt, prompt)
-    response = f"MyTeam Bot: {sql_query}"
+    response, response_type = respond_to_question(prompt, players, prompt_gemmi())
+    
     # Display assistant response in chat message container
     with st.chat_message("assistant"):
-        st.markdown(response)
+        if response_type == 'dataframe':
+            st.dataframe(response)  # Display the DataFrame
+        else:
+            st.markdown(response)  # Display the text response
+    
     # Add assistant response to chat history
-    st.session_state.messages.append({"role": "assistant", "content": response})
+    st.session_state.messages.append({"role": "assistant", "content": str(response)})
