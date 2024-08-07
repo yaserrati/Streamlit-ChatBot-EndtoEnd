@@ -6,6 +6,8 @@ import logging
 import pandas as pd
 import pandasql as ps
 import re
+import json
+
 
 
 # -------------------------------------------------------------------------------------------------------
@@ -65,6 +67,8 @@ def prompt_gemmi():
         SQL Query: SELECT Name, Assists FROM players ORDER BY Assists DESC LIMIT 1;
         Question: Which players are taller than 180 cm and weigh less than 80 kg?
         SQL Query: SELECT Name FROM players WHERE Height_CM > 180 AND Weight_KG < 80;
+        Question: What is the BMI of players?
+        SQL Query: SELECT Weight_KG / ((Height_CM / 100.0) * (Height_CM / 100.0)) AS BMI FROM players;
         Guidelines:
         1. Ensure the SQL code is syntactically correct and does not include delimiters like `;`.
         2. Avoid SQL keywords or delimiters in the output.
@@ -82,7 +86,7 @@ def generate_conversational_response(question):
     If a user greets you or asks how you are, respond with a polite and friendly reply.
     If the user asks for specific information, a specific topic, a question, or an order, respond with 
     "I am here to chat with you, but I do not have the information you are looking for."
-
+    
     Example interactions:
     User: "Hey"
     Assistant: "Hello! How can I help you today?"
@@ -114,12 +118,46 @@ def generate_conversational_response(question):
     """
     sql_query = get_gemini_response(custom_prompt.format(question=question), "")
     return sql_query
+
+# # -----------------------------------------
+# def load_interactions(json_file):
+#     with open(json_file, 'r') as file:
+#         data = json.load(file)
+#     return data["interactions"]
+
+# def generate_conversational_response(question, interactions_file='interactions.json'):
+#     interactions = load_interactions(interactions_file)
+    
+#     example_interactions = ""
+#     for interaction in interactions:
+#         example_interactions += f"""
+#     User: "{interaction['User']}"
+#     Assistant: "{interaction['Assistant']}"
+#     """
+    
+#     custom_prompt = f"""
+#     You are an assistant that responds to basic conversational queries in a friendly and helpful manner.
+#     If a user greets you or asks how you are, respond with a polite and friendly reply.
+#     If the user asks for specific information, a specific topic, a question, or an order, respond with 
+#     "I am here to chat with you, but I do not have the information you are looking for."
+
+#     Example interactions:{example_interactions}
+
+#     Now, respond to the following question:
+#     User: {question}
+#     Assistant:
+#     """
+    
+#     # Assuming get_gemini_response is a function you have that takes the prompt and question and returns a response
+#     response = get_gemini_response(custom_prompt, question)
+#     return response
+# # -----------------------------------------------
     
 
 def respond_to_question(question, dataframe, prompt):
     related_keywords = ['players', 'name', 'age', 'position', 'nationality',
                         'matches played', 'goals scored', 'assists',
-                        'yellow cards', 'red cards', 'height', 'weight', 'goalkeeper ']
+                        'yellow cards', 'red cards', 'height', 'weight', 'goalkeeper ','BMI', 'player']
 
     # Vérifier si la question est liée à la base de données
     if any(keyword in question.lower() for keyword in related_keywords):
